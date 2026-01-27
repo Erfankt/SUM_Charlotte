@@ -20,18 +20,23 @@ ws_file = pd.read_csv("../../../../Data/Final_dataset/ABT/WalkScore.csv")
 
 
 # edge_driver_path = r"C:/Users/ekefayat/AppData/Local/Programs/Python/Python313/msedgedriver.exe"
-edge_driver_path = r"C:/edgedriver_win64/msedgedriver.exe"
-service = Service(edge_driver_path) # Create a Service object with your driver path
+# edge_driver_path = r"C:/edgedriver_win64/msedgedriver.exe"
+# service = Service(edge_driver_path) # Create a Service object with your driver path
 
 
 def start_edge():
     edge_options = Options()
-    edge_options.add_argument("--inprivate")  # starts Edge in InPrivate mode
-    driver = webdriver.Edge(service=service, options=edge_options)
+    edge_options.add_argument("--inprivate")
+    edge_options.add_argument("--disable-blink-features=AutomationControlled")
+    edge_options.add_argument("--disable-dev-shm-usage")
+    edge_options.add_argument("--no-sandbox")
+
+    driver = webdriver.Edge(options=edge_options)  # 🚀 Selenium Manager
     driver.implicitly_wait(5)
     driver.maximize_window()
     driver.get("https://www.google.com/maps")
     return driver
+
 
 def click_if_exists(driver, xpath, timeout=2):
     try:
@@ -75,13 +80,15 @@ for idx, row in ABT_4326.iterrows():
         driver_google.quit()
         driver_google = start_edge()
     try:
-        searchbox_google = driver_google.find_element(By.ID, "searchboxinput")
+        searchbox_google = driver_google.find_element(By.ID, "UGojuc")
         station_centorid_address = str(row.geometry.centroid.y) + " " + str(row.geometry.centroid.x)
         searchbox_google.send_keys(station_centorid_address)
         driver_google.execute_script('document.getElementsByClassName("mL3xi")[0].click()')
         time.sleep(2)
 
-        address = driver_google.find_element(By.XPATH,"/html/body/div[1]/div[2]/div[9]/div[9]/div/div/div[1]/div[2]/div/div[1]/div/div/div[10]/div[2]/div[2]/span[2]/span").text
+        address = driver_google.find_element(By.XPATH,"/html/body/div[1]/div[2]/div[9]/div[8]/div/div/div[1]/div[2]/div/div[1]/div/div/div[10]/div[2]/div[2]/span[2]/span").text
+
+
 
         driver_google.execute_script("window.open('https://www.walkscore.com/', '_blank');")
         driver_google.switch_to.window(driver_google.window_handles[-1])
@@ -93,26 +100,49 @@ for idx, row in ABT_4326.iterrows():
         WebDriverWait(driver_google, 2).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[3]/div[2]/div/div[1]/div/form/button'))).click()
         time.sleep(7)
 
-        WebDriverWait(driver_google, 2).until(EC.element_to_be_clickable((By.XPATH,'/html/body/div[3]/div/div/div[2]/div[4]/div[1]/button'))).click()
+        #groceries score
+        if pd.isna(ws_file.loc[idx, "groceries_ws"]):
+
+            WebDriverWait(driver_google, 2).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[3]/div/div/div[2]/div[4]/div[1]/button'))).click()
+
+            try:
+                elem = driver_google.find_element(By.XPATH,"/html/body/div[6]/div[2]/div/div[2]/div[2]/div[1]/div[2]/div[1]/div/div/div[2]/div")
+                style_text = elem.get_attribute("style") or ""
+                match = re.search(r"height:\s*([\d\.]+)%", style_text)
+                if match:
+                    groceries_Score = round(float(match.group(1)), 2)
+                else:
+                    groceries_Score = 999  # missing
+                    print(f"No groceries score data available for Sub {row[0]}!")
+            except:
+                groceries_Score = 999  # element missing entirely
+                print(f"No groceries score data available for Sub {row[0]}!")
+
+            ws_file.loc[idx, "groceries_ws"] = groceries_Score
+
+            time.sleep(1)
+            WebDriverWait(driver_google, 2).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[6]/div[1]/button'))).click()
+
+        else:
+            print(f"Groceries score is already calculated for Sub {row[0]}!")
+
 
         #transit score
-        alt_text = driver_google.find_element(By.XPATH, "/html/body/div[3]/div/div/div[2]/div[4]/div[1]/div[1]/div/img").get_attribute("alt")
-        transit_Score = int(re.findall(r"\d+", alt_text)[0])
+        if pd.isna(ws_file.loc[idx, "transit_ws"]):
+            try:
+                alt_text = driver_google.find_element(By.CSS_SELECTOR, "div[data-type='transit'].block-header-badge img")
+                alt_text = alt_text.get_attribute("alt")
+                transit_Score = int(re.search(r"\d+", alt_text).group())
+            except:
+                transit_Score = 999
+                print(f"No transit score data available for Sub {row[0]}!")
 
-        #groceries score
-        try:
-            elem = driver_google.find_element(By.XPATH,"/html/body/div[6]/div[2]/div/div[2]/div[2]/div[1]/div[2]/div[1]/div/div/div[2]/div")
-            style_text = elem.get_attribute("style") or ""
-            match = re.search(r"height:\s*([\d\.]+)%", style_text)
-            if match:
-                groceries_Score = round(float(match.group(1)), 2)
-            else:
-                groceries_Score = 999  # height missing
-        except:
-            groceries_Score = 999  # element missing entirely
+            ws_file.loc[idx, "transit_ws"] = transit_Score
 
-        time.sleep(1)
-        WebDriverWait(driver_google, 2).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[6]/div[1]/button'))).click()
+        else:
+            print(f"Transit score is already calculated for Sub {row[0]}!")
+
+
         WebDriverWait(driver_google, 2).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[2]/div[1]/div[2]/div[1]/a'))).click()
 
         driver_google.switch_to.window(driver_google.window_handles[-1])
@@ -122,18 +152,16 @@ for idx, row in ABT_4326.iterrows():
 
         WebDriverWait(driver_google, 2).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div[2]/div[9]/div[3]/div[1]/div[1]/div/div[1]/div[2]/button'))).click()
 
-        ws_file.loc[idx, "transit_ws"] = transit_Score
-        ws_file.loc[idx, "groceries_ws"] = groceries_Score
+        print(f'Sub {row[0]} has been updated! transit_score: {ws_file.at[idx, "transit_ws"]}, groceries_score: {ws_file.at[idx, "groceries_ws"]}')
 
-        print(f"Sub {idx} has been updated!")
         time.sleep(2)
 
     except Exception as e:
         print(f"[{idx}] ❌ Error: {e}")
-        ws_file[["subd_id", "transit_ws", "groceries_ws"]].to_csv("../../../Data/Final_dataset/ABT/WalkScore.csv")
+        ws_file[["subd_id", "transit_ws", "groceries_ws"]].to_csv("../../../../Data/Final_dataset/ABT/WalkScore.csv")
         driver_google.quit()
         time.sleep(10)
         continue
 
-ws_file[["subd_id", "transit_ws", "groceries_ws"]].to_csv("../../../Data/Final_dataset/ABT/WalkScore.csv")
+ws_file[["subd_id", "transit_ws", "groceries_ws"]].to_csv("../../../../Data/Final_dataset/ABT/WalkScore.csv")
 
