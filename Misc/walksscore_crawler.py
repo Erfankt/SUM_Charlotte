@@ -31,7 +31,7 @@ def start_edge():
     edge_options.add_argument("--disable-dev-shm-usage")
     edge_options.add_argument("--no-sandbox")
 
-    driver = webdriver.Edge(options=edge_options)  # 🚀 Selenium Manager
+    driver = webdriver.Edge(options=edge_options)
     driver.implicitly_wait(5)
     driver.maximize_window()
     driver.get("https://www.google.com/maps")
