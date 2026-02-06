@@ -19,6 +19,14 @@ ABT_4326 = gpd.read_file("../../../../Data/Final_dataset/ABT/ABT.gpkg", layer="s
 ws_file = pd.read_csv("../../../../Data/Final_dataset/ABT/WalkScore.csv")
 
 
+# Compute centroids
+if not "lat" in ws_file.columns and not "lon" in ws_file.columns:
+    ABT_4326["centroid"] = ABT_4326.geometry.centroid
+    ABT_4326["lon"] = ABT_4326["centroid"].x; ABT_4326["lat"] = ABT_4326["centroid"].y
+    coords = ABT_4326[["subd_id", "lat", "lon"]]
+    ws_file = ws_file.merge(coords, on="subd_id", how="left")
+
+
 # edge_driver_path = r"C:/Users/ekefayat/AppData/Local/Programs/Python/Python313/msedgedriver.exe"
 # edge_driver_path = r"C:/edgedriver_win64/msedgedriver.exe"
 # service = Service(edge_driver_path) # Create a Service object with your driver path
@@ -66,17 +74,19 @@ def is_driver_alive(driver):
 driver_google = start_edge()
 
 
-ABT_4326["transit_ws"] = None
-ABT_4326["groceries_ws"] = None
+ABT_4326["transit_ws"] = None; ABT_4326["groceries_ws"] = None
 
 temp_iter = 0
 for idx, row in ABT_4326.iterrows():
-    if pd.notnull(ws_file.loc[idx, "transit_ws"]) and pd.notnull(ws_file.loc[idx, "groceries_ws"]):
-        print(f"{idx} is already calculated!")
+    mask = ws_file["subd_id"] == row["subd_id"]
+    subset = ws_file.loc[mask, ["transit_ws", "groceries_ws"]]
+
+    if not subset.empty and subset.loc[:, ["transit_ws", "groceries_ws"]].notna().values[0].all():
+        print(f"{row['subd_id']} is already calculated!")
         continue
     if not is_driver_alive(driver_google):
         driver_google = start_edge()
-    if idx % 50 == 0:
+    if idx % 50 == 0 and idx != 0:
         driver_google.quit()
         driver_google = start_edge()
     try:
@@ -88,8 +98,6 @@ for idx, row in ABT_4326.iterrows():
 
         address = driver_google.find_element(By.XPATH,"/html/body/div[1]/div[2]/div[9]/div[8]/div/div/div[1]/div[2]/div/div[1]/div/div/div[10]/div[2]/div[2]/span[2]/span").text
 
-
-
         driver_google.execute_script("window.open('https://www.walkscore.com/', '_blank');")
         driver_google.switch_to.window(driver_google.window_handles[-1])
         wait = WebDriverWait(driver_google, 5)
@@ -98,10 +106,10 @@ for idx, row in ABT_4326.iterrows():
         searchbox_walkscore.send_keys(address)
         time.sleep(2)
         WebDriverWait(driver_google, 2).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[3]/div[2]/div/div[1]/div/form/button'))).click()
-        time.sleep(7)
+        time.sleep(3)
 
         #groceries score
-        if pd.isna(ws_file.loc[idx, "groceries_ws"]):
+        if pd.isna(ws_file.loc[mask, "groceries_ws"].iloc[0]):
 
             WebDriverWait(driver_google, 2).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[3]/div/div/div[2]/div[4]/div[1]/button'))).click()
 
@@ -113,34 +121,34 @@ for idx, row in ABT_4326.iterrows():
                     groceries_Score = round(float(match.group(1)), 2)
                 else:
                     groceries_Score = 999  # missing
-                    print(f"No groceries score data available for Sub {row[0]}!")
+                    print(f"No groceries score data available for Sub {row['subd_id']}!")
             except:
                 groceries_Score = 999  # element missing entirely
-                print(f"No groceries score data available for Sub {row[0]}!")
+                print(f"No groceries score data available for Sub {row['subd_id']}!")
 
-            ws_file.loc[idx, "groceries_ws"] = groceries_Score
+            ws_file.loc[mask, "groceries_ws"] = groceries_Score
 
             time.sleep(1)
             WebDriverWait(driver_google, 2).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[6]/div[1]/button'))).click()
 
         else:
-            print(f"Groceries score is already calculated for Sub {row[0]}!")
+            print(f"Groceries score is already calculated for Sub {row['subd_id']}!")
 
 
         #transit score
-        if pd.isna(ws_file.loc[idx, "transit_ws"]):
+        if pd.isna(ws_file.loc[mask, "transit_ws"].iloc[0]):
             try:
                 alt_text = driver_google.find_element(By.CSS_SELECTOR, "div[data-type='transit'].block-header-badge img")
                 alt_text = alt_text.get_attribute("alt")
                 transit_Score = int(re.search(r"\d+", alt_text).group())
             except:
                 transit_Score = 999
-                print(f"No transit score data available for Sub {row[0]}!")
+                print(f"No transit score data available for Sub {row['subd_id']}!")
 
-            ws_file.loc[idx, "transit_ws"] = transit_Score
+            ws_file.loc[mask, "transit_ws"] = transit_Score
 
         else:
-            print(f"Transit score is already calculated for Sub {row[0]}!")
+            print(f"Transit score is already calculated for Sub {row['subd_id']}!")
 
 
         WebDriverWait(driver_google, 2).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[2]/div[1]/div[2]/div[1]/a'))).click()
@@ -152,16 +160,22 @@ for idx, row in ABT_4326.iterrows():
 
         WebDriverWait(driver_google, 2).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div[2]/div[9]/div[3]/div[1]/div[1]/div/div[1]/div[2]/button'))).click()
 
-        print(f'Sub {row[0]} has been updated! transit_score: {ws_file.at[idx, "transit_ws"]}, groceries_score: {ws_file.at[idx, "groceries_ws"]}')
+        print(
+            f'Sub {row["subd_id"]} has been updated! '
+            f'transit_score: {ws_file.loc[mask, "transit_ws"].iloc[0]}, '
+            f'groceries_score: {ws_file.loc[mask, "groceries_ws"].iloc[0]}'
+        )
 
         time.sleep(2)
 
     except Exception as e:
-        print(f"[{idx}] ❌ Error: {e}")
-        ws_file[["subd_id", "transit_ws", "groceries_ws"]].to_csv("../../../../Data/Final_dataset/ABT/WalkScore.csv")
+        print(f"{row['subd_id']} ❌ Error: {e}")
+        ws_file.loc[mask, "groceries_ws"] = 999
+        ws_file.loc[mask, "transit_ws"] = 999
+        ws_file.to_csv("../../../../Data/Final_dataset/ABT/WalkScore.csv", index=False)
         driver_google.quit()
-        time.sleep(10)
+        time.sleep(4)
         continue
 
-ws_file[["subd_id", "transit_ws", "groceries_ws"]].to_csv("../../../../Data/Final_dataset/ABT/WalkScore.csv")
+ws_file.to_csv("../../../../Data/Final_dataset/ABT/WalkScore.csv", index=False)
 
